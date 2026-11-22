@@ -106,7 +106,7 @@ class Segmenter {
     if (speaking) { this.voiced += ds.length; this.silent = 0; } else this.silent += ds.length;
 
     const secs = this.len / SR;
-    if ((this.silent > 0.7 * SR && secs >= 3) || this.silent > 2 * SR || secs >= 25) this.flush();
+    if ((this.silent > 0.7 * SR && secs >= 3) || this.silent > 2 * SR || secs >= 15) this.flush(); // 15 s cap keeps timestamps tight
   }
   flush() {
     if (this.start !== null && this.voiced > 0.3 * SR) {
@@ -317,6 +317,7 @@ els.noteInput.addEventListener('keydown', async (e) => {
   els.noteInput.value = '';
   await dbPut(meeting);
   renderNotes();
+  renderTranscript();
 });
 
 // ---------- rendering ----------
@@ -344,7 +345,16 @@ function renderTranscript() {
     box.innerHTML = `<p class="empty">${recording ? 'Listening…' : 'Press Start. Use headphones on calls so your mic doesn\'t pick up the other side.'}</p>`;
     return;
   }
-  for (const s of meeting.segments) {
+  for (const e of timeline(meeting)) {
+    if (e.note) {
+      const n = document.createElement('div');
+      n.className = 'seg inline-note';
+      n.innerHTML = `<time>${fmt(e.t)}</time><b>📝</b>`;
+      n.append(Object.assign(document.createElement('span'), { textContent: e.note.text }));
+      box.append(n);
+      continue;
+    }
+    const s = e.seg;
     const row = document.createElement('div');
     row.className = 'seg';
     row.innerHTML = `<time>${fmt(s.t)}</time><b class="${s.who}">${s.who}</b>`;
@@ -400,13 +410,35 @@ function toMarkdown(m) {
   let md = `# ${m.title}\n\n_${when} · ${fmt(m.duration)}_\n\n`;
   if (m.notes.length) md += `## My notes\n\n${m.notes.map((n) => `- [${fmt(n.t)}] ${n.text}`).join('\n')}\n\n`;
   md += '## Transcript\n\n';
-  let last = null;
-  for (const s of m.segments) {
-    if (last && last.who === s.who && s.t - last.end < 4) md = md.replace(/\n\n$/, ` ${s.text}\n\n`);
-    else md += `**${s.who}** [${fmt(s.t)}]: ${s.text}\n\n`;
-    last = { who: s.who, end: s.t + (s.dur || 0) };
+  // Paragraphs break on speaker change, a pause of 4 s+, or every 30 s, and each one gets its own time.
+  // Notes are placed in the transcript at the moment they were typed.
+  const out = [];
+  let block = null;
+  const close = () => {
+    if (block) out.push(`**${block.who}** [${fmt(block.t)}]: ${block.text.join(' ')}`);
+    block = null;
+  };
+  for (const e of timeline(m)) {
+    if (e.note) { close(); out.push(`> 📝 [${fmt(e.t)}] ${e.note.text}`); continue; }
+    const s = e.seg;
+    if (block && block.who === s.who && s.t - block.end < 4 && s.t - block.t < 30) {
+      block.text.push(s.text);
+      block.end = s.t + (s.dur || 0);
+    } else {
+      close();
+      block = { who: s.who, t: s.t, end: s.t + (s.dur || 0), text: [s.text] };
+    }
   }
-  return md;
+  close();
+  return md + out.join('\n\n') + '\n';
+}
+
+// Segments and notes merged in time order. A note typed during a segment lands after it.
+function timeline(m) {
+  return [
+    ...m.segments.map((seg) => ({ t: seg.t, seg })),
+    ...m.notes.map((note) => ({ t: note.t, note })),
+  ].sort((a, b) => a.t - b.t || (a.note ? 1 : -1));
 }
 
 const AI_PROMPT = `You are my meeting-notes assistant. Below are my rough timestamped notes and a raw machine transcript ("Me" = me, "Them" = remote participants, "Room" = in-person audio). The transcript has recognition errors; correct obvious ones from context.
@@ -417,6 +449,8 @@ Produce, in Australian English:
 3. Actions as a table: owner, action, due date if mentioned
 4. Open questions / risks
 5. My notes, expanded with the relevant detail from the transcript around each note's timestamp
+
+Lines starting with 📝 inside the transcript are my notes, placed at the moment I typed them; the speech just before each one is usually what it refers to. Treat "I" in "Me" or "Room" lines as me (Michael) when assigning action owners.
 
 Do not invent anything that is not in the transcript or notes. Mark uncertain names or terms with (?).
 
