@@ -1,6 +1,6 @@
 // App shell: network-first (so updates apply), cache fallback (so the installed app opens offline).
 // Transformers.js library from jsDelivr: cache-first. Model files are cached by Transformers.js itself.
-const CACHE = 'meetnotes-v1.2';
+const CACHE = 'meetnotes-v1.2.1';
 const SHELL = ['./', 'index.html', 'app.js', 'worker.js', 'capture-worklet.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -14,7 +14,8 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   if (url.origin === location.origin) {
     e.respondWith(
-      fetch(e.request)
+      // no-cache: always revalidate with the server, so GitHub Pages' 10-minute cache can't mix old and new files
+      fetch(new Request(e.request.url, { cache: 'no-cache', credentials: 'same-origin' }))
         .then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return r; })
         .catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match('index.html')))
     );
