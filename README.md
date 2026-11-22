@@ -1,4 +1,4 @@
-# MeetNotes v1.2
+# MeetNotes v1.3
 
 Private meeting transcription for Edge on Windows. Audio and transcripts stay on your laptop. Whisper runs inside the browser (on your GPU via WebGPU when it can, otherwise on the CPU).
 
@@ -17,6 +17,9 @@ If WDAC/AppLocker blocks the script, use `npx serve -l 8787` in the folder inste
 - **In-person meeting:** untick **System audio**. The mic is labelled **Room**.
 - Tick **Participants informed**, then press **Start**.
 - Type notes in the right-hand box during the meeting. Press Enter and each one is stamped with the meeting time.
+- Start a note with **a:** for an action, **d:** for a decision or **q:** for a question. Tagged notes are colour-coded, listed at the top of the export, and the AI treats them as confirmed.
+- **Pause** stops recording and transcribing, e.g. for an off-the-record moment. A ⏸ marker shows where it happened, and timestamps skip the paused time so they still match the saved audio.
+- **Search** (top of the Library) looks through every meeting's titles, notes and transcripts. Multiple words must all match. Open a result and the matching lines are highlighted.
 - Click any transcript line to correct it.
 - **Copy for AI** copies a summarising prompt with your context, notes and transcript, ready to paste into Claude or Copilot. Your notes appear in the transcript at the moment you typed them (📝).
 - **Audio** downloads the recording as stereo WebM: left = you, right = them. Keep it if you want to re-run it later through a better model or Azure Speech.
