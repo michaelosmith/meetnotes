@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MeetNotes v1.1</title>
+<title>MeetNotes v1.2</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <meta name="theme-color" content="#1f3a5f">
@@ -48,6 +48,14 @@
   #noteInput { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--ink); font:inherit; }
   #actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .empty { color:var(--muted); font-style:italic; }
+  dialog { border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--ink); width:min(760px, 94vw); max-height:90vh; padding:18px; }
+  dialog::backdrop { background:rgba(0,0,0,.4); }
+  dialog h2 { margin:0 0 4px; font-size:18px; }
+  dialog label.field { display:block; margin-top:12px; font-weight:600; }
+  dialog label.field small { display:block; font-weight:400; color:var(--muted); }
+  dialog textarea { width:100%; margin-top:4px; padding:8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--ink); font:13px/1.4 Consolas, monospace; resize:vertical; }
+  dialog .row { display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; margin-top:14px; }
+  dialog .row div { display:flex; gap:8px; flex-wrap:wrap; }
   @media (max-width: 900px) { main { grid-template-columns:1fr; } aside { display:none; } #notesPane { border-left:0; border-top:1px solid var(--line); } }
 </style>
 </head>
@@ -62,6 +70,7 @@
   </select>
   <label class="chk" title="Capture Teams/Zoom/browser audio via screen share"><input id="sys" type="checkbox" checked> System audio</label>
   <label class="chk" title="Tick once everyone knows the meeting is being recorded"><input id="consent" type="checkbox"> Participants informed</label>
+  <button id="settingsBtn" title="Glossary, people and context">⚙ Settings</button>
   <button id="newBtn">New</button>
   <button id="recBtn" class="primary">Start</button>
   <span id="clock">0:00</span>
@@ -88,6 +97,35 @@
     </div>
   </section>
 </main>
+<dialog id="settings">
+  <h2>Settings</h2>
+  <small style="color:var(--muted)">Saved in this browser only. Never uploaded.</small>
+  <label class="field">Glossary
+    <small>One per line. A plain term teaches the spelling. <code>misheard -&gt; Correct</code> auto-fixes the transcript. Separate several mishearings with <code>|</code>. Lines starting with # are ignored.</small>
+    <textarea id="setGlossary" rows="9"></textarea>
+  </label>
+  <label class="field">People
+    <small>One per line: <code>Name = role</code>. Helps name spelling and action owners.</small>
+    <textarea id="setPeople" rows="5"></textarea>
+  </label>
+  <label class="field">About me and current priorities
+    <small>Added to every Copy for AI prompt.</small>
+    <textarea id="setAbout" rows="4"></textarea>
+  </label>
+  <label class="chk" style="margin-top:12px"><input id="setBias" type="checkbox"> Experimental: steer Whisper with glossary terms and names (turns itself off if unsupported)</label>
+  <div class="row">
+    <div>
+      <button id="setApply" title="Run the auto-fixes over the meeting that's open">Apply fixes to this meeting</button>
+      <button id="setExport">Export settings</button>
+      <button id="setImport">Import settings</button>
+      <input id="setImportFile" type="file" accept="application/json" hidden>
+    </div>
+    <div>
+      <button id="setCancel">Cancel</button>
+      <button id="setSave" class="primary">Save</button>
+    </div>
+  </div>
+</dialog>
 <script type="module" src="app.js"></script>
 </body>
 </html>
