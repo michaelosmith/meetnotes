@@ -1,4 +1,4 @@
-# MeetNotes (MVP)
+# MeetNotes v1.2
 
 Private meeting transcription for Edge on Windows. Audio and transcripts stay on your laptop. Whisper runs inside the browser (on your GPU via WebGPU when it can, otherwise on the CPU).
 
@@ -18,8 +18,18 @@ If WDAC/AppLocker blocks the script, use `npx serve -l 8787` in the folder inste
 - Tick **Participants informed**, then press **Start**.
 - Type notes in the right-hand box during the meeting. Press Enter and each one is stamped with the meeting time.
 - Click any transcript line to correct it.
-- **Copy for AI** copies a summarising prompt with your notes and transcript, ready to paste into Claude or Copilot (v2 will do this automatically).
+- **Copy for AI** copies a summarising prompt with your context, notes and transcript, ready to paste into Claude or Copilot. Your notes appear in the transcript at the moment you typed them (📝).
 - **Audio** downloads the recording as stereo WebM: left = you, right = them. Keep it if you want to re-run it later through a better model or Azure Speech.
+
+## Settings (⚙)
+
+Settings are stored in this browser only. They're never put in the repo, so keep your own lists out of the code.
+
+- **Glossary:** a plain line like `Conditional Access` teaches the spelling. A line like `conditional excess | conditional axis -> Conditional Access` auto-fixes new transcript lines. **Apply fixes to this meeting** runs the fixes over a meeting you've already recorded. Fixes are blunt find-and-replace, so avoid everyday phrases (e.g. `in tune -> Intune` would also change "in tune with").
+- **People:** `Name = role`. Used for spelling, and to help the AI pick action owners.
+- **About me:** added to every Copy for AI prompt.
+- **Experimental steering:** passes the glossary terms and names to Whisper as a prompt. If the model doesn't support it, it turns itself off and says so in the status bar. If you see glossary words turning up in silence, switch it off.
+- **Export / Import settings** moves your settings between browsers or laptops as a JSON file.
 
 ## Models
 
