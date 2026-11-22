@@ -117,6 +117,77 @@ class Segmenter {
   }
 }
 
+// ---------- settings: glossary, people, context ----------
+const SETTINGS_KEY = 'meetnotes.settings';
+const DEFAULT_SETTINGS = {
+  glossary: `# One per line. Plain term = teach the spelling. "misheard -> Correct" = auto-fix.
+Microsoft 365
+Entra ID
+Intune
+Conditional Access
+Teams
+SharePoint
+OneDrive
+conditional excess | conditional axis -> Conditional Access
+intra id | enter id -> Entra ID`,
+  people: '# Name = role',
+  about: '',
+  bias: false,
+};
+function loadSettings() {
+  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
+  catch { return { ...DEFAULT_SETTINGS }; }
+}
+function saveSettings(next) {
+  settings = { ...DEFAULT_SETTINGS, ...next };
+  glossary = parseGlossary(settings.glossary);
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
+}
+const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const contentLines = (text) => (text || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+
+function parseGlossary(text) {
+  const terms = new Set();
+  const fixes = [];
+  for (const line of contentLines(text)) {
+    const m = line.split(/\s*(?:->|=>|→)\s*/);
+    if (m.length >= 2 && m.at(-1)) {
+      const to = m.at(-1);
+      terms.add(to);
+      for (const wrong of m.slice(0, -1).join('|').split('|').map((w) => w.trim()).filter(Boolean)) {
+        fixes.push({ re: new RegExp(`(?<![\\w'])${escRe(wrong)}(?![\\w'])`, 'gi'), to });
+      }
+    } else terms.add(line);
+  }
+  return { terms: [...terms], fixes };
+}
+function people() {
+  return contentLines(settings.people).map((l) => {
+    const [name, ...role] = l.split('=');
+    return { name: name.trim(), role: role.join('=').trim() };
+  }).filter((p) => p.name);
+}
+function applyFixes(text) {
+  for (const f of glossary.fixes) text = text.replace(f.re, f.to);
+  return text;
+}
+let settings = loadSettings();
+let glossary = parseGlossary(settings.glossary);
+
+function whisperPrompt() {
+  if (!settings.bias) return '';
+  const words = [...glossary.terms, ...people().map((p) => p.name)];
+  return words.length ? `${words.join(', ')}.` : '';
+}
+function contextBlock() {
+  const parts = [];
+  if (settings.about.trim()) parts.push(`About me:\n${settings.about.trim()}`);
+  const ppl = people();
+  if (ppl.length) parts.push(`People who may come up (use these spellings, and these roles to infer owners):\n${ppl.map((p) => `- ${p.name}${p.role ? ` = ${p.role}` : ''}`).join('\n')}`);
+  if (glossary.terms.length) parts.push(`Terms used in my work (prefer these spellings):\n${glossary.terms.join(', ')}`);
+  return parts.length ? `Context:\n\n${parts.join('\n\n')}\n\n` : '';
+}
+
 // ---------- transcription worker ----------
 const worker = new Worker('worker.js', { type: 'module' });
 let modelReady = false, loadedModel = null;
@@ -138,6 +209,10 @@ worker.onmessage = async (e) => {
     setStatus(`Model error: ${m.message}`, true);
   } else if (m.type === 'result') {
     await onResult(m);
+  } else if (m.type === 'bias-failed') {
+    console.warn('Glossary steering failed:', m.message);
+    saveSettings({ ...settings, bias: false });
+    setStatus('Glossary steering isn\'t supported by this model, so it was turned off. Auto-fixes still apply.', true);
   }
 };
 
@@ -162,7 +237,7 @@ const MAYBE_JUNK = /^(thank you\.?|you\.?|bye\.?|okay\.?)$/i;
 function onChunk(c) {
   const id = nextId++;
   pending.set(id, { mid: meeting.id, who: c.who, start: c.start, dur: c.dur, voiced: c.voiced });
-  worker.postMessage({ type: 'transcribe', id, audio: c.audio }, [c.audio.buffer]);
+  worker.postMessage({ type: 'transcribe', id, audio: c.audio, prompt: whisperPrompt() }, [c.audio.buffer]);
   updateQueue();
 }
 
@@ -172,6 +247,7 @@ async function onResult({ id, text, error }) {
   updateQueue();
   if (!p) return;
   if (error) { console.warn('Transcription error', error); return; }
+  text = applyFixes(text || '');
   if (!text || JUNK.test(text) || (MAYBE_JUNK.test(text) && p.voiced < 1)) return; // Whisper hallucinations on near-silence
   const target = meeting && meeting.id === p.mid ? meeting : await dbGet(p.mid);
   if (!target) return;
@@ -452,16 +528,14 @@ Produce, in Australian English:
 
 Lines starting with 📝 inside the transcript are my notes, placed at the moment I typed them; the speech just before each one is usually what it refers to. Treat "I" in "Me" or "Room" lines as me (Michael) when assigning action owners.
 
-Do not invent anything that is not in the transcript or notes. Mark uncertain names or terms with (?).
-
----
+Use the context below for spellings, roles and likely owners, but do not invent anything that is not in the transcript or notes. Mark uncertain names or terms with (?).
 
 `;
 
 els.exportMd.onclick = () => meeting && download(`${safeName(meeting.title)}.md`, new Blob([toMarkdown(meeting)], { type: 'text/markdown' }));
 els.copyAi.onclick = async () => {
   if (!meeting) return;
-  await navigator.clipboard.writeText(AI_PROMPT + toMarkdown(meeting));
+  await navigator.clipboard.writeText(AI_PROMPT + contextBlock() + '---\n\n' + toMarkdown(meeting));
   setStatus('Copied. Paste into Claude or Copilot.');
 };
 els.exportAudio.onclick = async () => {
@@ -490,6 +564,37 @@ async function enumerateMics() {
     els.mic.value = cur;
   } catch {}
 }
+
+// ---------- settings dialog ----------
+const dlg = $('#settings');
+const f = { glossary: $('#setGlossary'), people: $('#setPeople'), about: $('#setAbout'), bias: $('#setBias') };
+const readForm = () => ({ glossary: f.glossary.value, people: f.people.value, about: f.about.value, bias: f.bias.checked });
+function fillForm(x) { f.glossary.value = x.glossary; f.people.value = x.people; f.about.value = x.about; f.bias.checked = !!x.bias; }
+$('#settingsBtn').onclick = () => { fillForm(settings); dlg.showModal(); };
+$('#setCancel').onclick = () => dlg.close();
+$('#setSave').onclick = () => {
+  saveSettings(readForm());
+  dlg.close();
+  setStatus(`Settings saved: ${glossary.terms.length} terms, ${glossary.fixes.length} auto-fixes, ${people().length} people.`);
+};
+$('#setApply').onclick = async () => {
+  saveSettings(readForm());
+  if (!meeting) { setStatus('Open a meeting first.', true); return; }
+  let changed = 0;
+  for (const s of meeting.segments) { const v = applyFixes(s.text); if (v !== s.text) { s.text = v; changed++; } }
+  await dbPut(meeting);
+  renderTranscript();
+  setStatus(`Fixed ${changed} line${changed === 1 ? '' : 's'} in "${meeting.title}".`);
+};
+$('#setExport').onclick = () => download('meetnotes-settings.json', new Blob([JSON.stringify(readForm(), null, 2)], { type: 'application/json' }));
+$('#setImport').onclick = () => $('#setImportFile').click();
+$('#setImportFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try { fillForm({ ...DEFAULT_SETTINGS, ...JSON.parse(await file.text()) }); setStatus('Imported. Press Save to keep it.'); }
+  catch { setStatus('That file isn\'t a MeetNotes settings export.', true); }
+};
 
 // ---------- boot ----------
 window.addEventListener('beforeunload', (e) => { if (recording) { e.preventDefault(); e.returnValue = ''; } });
