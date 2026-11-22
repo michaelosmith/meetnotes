@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeetNotes</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<meta name="theme-color" content="#1f3a5f">
+<style>
+  :root {
+    --bg:#f6f7f9; --panel:#fff; --ink:#1b1f24; --muted:#6b7280; --line:#e3e6ea;
+    --accent:#1f3a5f; --me:#2563eb; --them:#059669; --room:#7c3aed; --rec:#dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111418; --panel:#1a1f25; --ink:#e7eaee; --muted:#9aa3ad; --line:#2a313a; --accent:#8fb3e0; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--ink); height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 14px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header input[type=text] { flex:1 1 260px; font-size:16px; font-weight:600; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--ink); }
+  select, button { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink); cursor:pointer; }
+  button:disabled, select:disabled { opacity:.5; cursor:default; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.rec { background:var(--rec); color:#fff; border-color:var(--rec); }
+  label.chk { display:flex; align-items:center; gap:4px; color:var(--muted); white-space:nowrap; }
+  #clock { font-variant-numeric:tabular-nums; font-weight:600; min-width:60px; text-align:right; }
+  #statusbar { padding:4px 14px; font-size:12px; color:var(--muted); border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:12px; }
+  #statusbar.err { color:var(--rec); }
+  main { flex:1; display:grid; grid-template-columns:220px 1fr 340px; min-height:0; }
+  aside, section { min-height:0; overflow:auto; }
+  aside { border-right:1px solid var(--line); padding:10px; }
+  aside h3, section h3 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  #library .item { padding:6px 8px; border-radius:6px; cursor:pointer; }
+  #library .item:hover, #library .item.active { background:var(--bg); }
+  #library .item small { display:block; color:var(--muted); }
+  #transcriptPane { padding:14px 18px; }
+  .seg { display:grid; grid-template-columns:52px 56px 1fr; gap:6px; padding:3px 0; }
+  .seg time { color:var(--muted); font-variant-numeric:tabular-nums; font-size:12px; padding-top:2px; }
+  .seg b { font-size:12px; padding-top:2px; }
+  .seg b.Me { color:var(--me); } .seg b.Them { color:var(--them); } .seg b.Room { color:var(--room); }
+  .seg span[contenteditable]:focus { outline:1px dashed var(--muted); }
+  #notesPane { border-left:1px solid var(--line); display:flex; flex-direction:column; padding:10px; }
+  #notesList { flex:1; overflow:auto; }
+  .note { padding:4px 0; border-bottom:1px solid var(--line); }
+  .note time { color:var(--muted); font-size:12px; margin-right:6px; }
+  #noteInput { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--ink); font:inherit; }
+  #actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .empty { color:var(--muted); font-style:italic; }
+  @media (max-width: 900px) { main { grid-template-columns:1fr; } aside { display:none; } #notesPane { border-left:0; border-top:1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header>
+  <input id="title" type="text" placeholder="Meeting title" autocomplete="off">
+  <select id="mic" title="Microphone"><option value="">Default mic</option></select>
+  <select id="model" title="Transcription model">
+    <option value="whisper-tiny">Tiny (fastest)</option>
+    <option value="whisper-base" selected>Base (balanced)</option>
+    <option value="whisper-small">Small (best, needs GPU)</option>
+  </select>
+  <label class="chk" title="Capture Teams/Zoom/browser audio via screen share"><input id="sys" type="checkbox" checked> System audio</label>
+  <label class="chk" title="Tick once everyone knows the meeting is being recorded"><input id="consent" type="checkbox"> Participants informed</label>
+  <button id="newBtn">New</button>
+  <button id="recBtn" class="primary">Start</button>
+  <span id="clock">0:00</span>
+</header>
+<div id="statusbar"><span id="status">Loading…</span><span id="queue"></span></div>
+<main>
+  <aside>
+    <h3>Library</h3>
+    <div id="library"></div>
+  </aside>
+  <section id="transcriptPane">
+    <h3>Transcript</h3>
+    <div id="transcript"><p class="empty">Press Start. Use headphones on calls so your mic doesn't pick up the other side.</p></div>
+  </section>
+  <section id="notesPane">
+    <h3>My notes</h3>
+    <div id="notesList"></div>
+    <input id="noteInput" type="text" placeholder="Type a note, Enter to add (timestamped)" disabled>
+    <div id="actions">
+      <button id="copyAi" disabled title="Copy notes + transcript with a summarising prompt">Copy for AI</button>
+      <button id="exportMd" disabled>Export .md</button>
+      <button id="exportAudio" disabled>Audio</button>
+      <button id="delBtn" disabled>Delete</button>
+    </div>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
