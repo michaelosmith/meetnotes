@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MeetNotes</title>
+<title>MeetNotes v1.1</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <meta name="theme-color" content="#1f3a5f">
@@ -39,6 +39,7 @@
   .seg time { color:var(--muted); font-variant-numeric:tabular-nums; font-size:12px; padding-top:2px; }
   .seg b { font-size:12px; padding-top:2px; }
   .seg b.Me { color:var(--me); } .seg b.Them { color:var(--them); } .seg b.Room { color:var(--room); }
+  .seg.inline-note { color:var(--accent); font-style:italic; }
   .seg span[contenteditable]:focus { outline:1px dashed var(--muted); }
   #notesPane { border-left:1px solid var(--line); display:flex; flex-direction:column; padding:10px; }
   #notesList { flex:1; overflow:auto; }
