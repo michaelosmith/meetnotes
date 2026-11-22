@@ -1,6 +1,6 @@
 // App shell: network-first (so updates apply), cache fallback (so the installed app opens offline).
 // Transformers.js library from jsDelivr: cache-first. Model files are cached by Transformers.js itself.
-const CACHE = 'meetnotes-v1.2.1';
+const CACHE = 'meetnotes-v1.3';
 const SHELL = ['./', 'index.html', 'app.js', 'worker.js', 'capture-worklet.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
