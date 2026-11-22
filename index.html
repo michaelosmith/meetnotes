@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MeetNotes v1.2</title>
+<title>MeetNotes v1.3</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <meta name="theme-color" content="#1f3a5f">
@@ -48,6 +48,13 @@
   #noteInput { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--ink); font:inherit; }
   #actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .empty { color:var(--muted); font-style:italic; }
+  #search { width:100%; padding:6px 8px; margin-bottom:8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--ink); font:inherit; }
+  #library .item small.snip { font-style:italic; }
+  .seg.hit { background:rgba(250, 204, 21, .25); border-radius:4px; }
+  .seg.inline-note.action, .note.action { color:#15803d; font-style:normal; font-weight:600; }
+  .seg.inline-note.decision, .note.decision { color:#b45309; font-style:normal; font-weight:600; }
+  .seg.inline-note.question, .note.question { color:#7c3aed; font-style:normal; font-weight:600; }
+  .seg.inline-note.pause { color:var(--muted); }
   dialog { border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--ink); width:min(760px, 94vw); max-height:90vh; padding:18px; }
   dialog::backdrop { background:rgba(0,0,0,.4); }
   dialog h2 { margin:0 0 4px; font-size:18px; }
@@ -72,6 +79,7 @@
   <label class="chk" title="Tick once everyone knows the meeting is being recorded"><input id="consent" type="checkbox"> Participants informed</label>
   <button id="settingsBtn" title="Glossary, people and context">⚙ Settings</button>
   <button id="newBtn">New</button>
+  <button id="pauseBtn" hidden>Pause</button>
   <button id="recBtn" class="primary">Start</button>
   <span id="clock">0:00</span>
 </header>
@@ -79,6 +87,7 @@
 <main>
   <aside>
     <h3>Library</h3>
+    <input id="search" type="search" placeholder="Search all meetings" autocomplete="off">
     <div id="library"></div>
   </aside>
   <section id="transcriptPane">
@@ -88,7 +97,7 @@
   <section id="notesPane">
     <h3>My notes</h3>
     <div id="notesList"></div>
-    <input id="noteInput" type="text" placeholder="Type a note, Enter to add (timestamped)" disabled>
+    <input id="noteInput" type="text" placeholder="Note + Enter.  a: action  d: decision  q: question" disabled>
     <div id="actions">
       <button id="copyAi" disabled title="Copy notes + transcript with a summarising prompt">Copy for AI</button>
       <button id="exportMd" disabled>Export .md</button>
