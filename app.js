@@ -5,7 +5,7 @@ const els = {
   title: $('#title'), mic: $('#mic'), model: $('#model'), sys: $('#sys'), consent: $('#consent'),
   newBtn: $('#newBtn'), recBtn: $('#recBtn'), clock: $('#clock'), status: $('#status'), statusbar: $('#statusbar'),
   queue: $('#queue'), library: $('#library'), transcript: $('#transcript'), notesList: $('#notesList'),
-  noteInput: $('#noteInput'), copyAi: $('#copyAi'), exportMd: $('#exportMd'), exportAudio: $('#exportAudio'), delBtn: $('#delBtn'),
+  noteInput: $('#noteInput'), pauseBtn: $('#pauseBtn'), search: $('#search'), copyAi: $('#copyAi'), exportMd: $('#exportMd'), exportAudio: $('#exportAudio'), delBtn: $('#delBtn'),
 };
 
 // ---------- storage (IndexedDB) ----------
@@ -258,10 +258,11 @@ async function onResult({ id, text, error }) {
 }
 
 // ---------- recording ----------
-let meeting = null, recording = false, t0 = 0;
+let meeting = null, recording = false, t0 = 0, paused = false, pausedAt = 0, pausedTotal = 0;
 let ctx = null, streams = [], recorder = null, recChunks = [], wakeLock = null, tick = null;
 const segmenters = [];
-const now = () => (performance.now() - t0) / 1000;
+// Meeting time excludes paused stretches, so transcript times line up with the saved audio.
+const now = () => ((paused ? pausedAt : performance.now()) - t0 - pausedTotal) / 1000;
 
 async function startRecording() {
   if (!els.consent.checked) {
@@ -311,7 +312,7 @@ async function startRecording() {
       src.connect(node); node.connect(sink);
       src.connect(merger, 0, channel);
       const seg = new Segmenter(who, ctx.sampleRate, onChunk);
-      node.port.onmessage = (e) => { if (recording) seg.push(e.data, now()); };
+      node.port.onmessage = (e) => { if (recording && !paused) seg.push(e.data, now()); };
       segmenters.push(seg);
     };
 
@@ -328,10 +329,10 @@ async function startRecording() {
     recorder.ondataavailable = (e) => e.data.size && recChunks.push(e.data);
     recorder.start(10000);
 
-    t0 = performance.now();
+    t0 = performance.now(); paused = false; pausedTotal = 0;
     recording = true;
     try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
-    tick = setInterval(() => { els.clock.textContent = fmt(now()); }, 500);
+    tick = setInterval(() => { els.clock.textContent = (paused ? '⏸ ' : '') + fmt(now()); }, 500);
     await dbPut(meeting);
     enumerateMics();
     if (!els.statusbar.classList.contains('err')) setStatus(modelReady ? 'Recording' : 'Recording (model still loading, audio is queued)');
@@ -356,7 +357,31 @@ function cleanupAudio() {
   wakeLock = null;
 }
 
+async function pauseRecording() {
+  if (!recording || paused) return;
+  segmenters.forEach((s) => { s.flush(); s.pre = []; s.preLen = 0; });
+  pausedAt = performance.now();
+  paused = true;
+  try { recorder.pause(); } catch {}
+  setStatus('Paused. Nothing is being recorded or transcribed.');
+  setUi();
+}
+async function resumeRecording(silent = false) {
+  if (!paused) return;
+  const secs = (performance.now() - pausedAt) / 1000;
+  const at = now();
+  pausedTotal += performance.now() - pausedAt;
+  paused = false;
+  if (!silent) { try { recorder.resume(); } catch {} }
+  meeting.notes.push({ t: at, tag: 'pause', text: `Paused for ${fmt(secs)} (off the record)` });
+  await dbPut(meeting);
+  if (!silent) setStatus('Recording');
+  setUi(); renderAll();
+}
+els.pauseBtn.onclick = () => (paused ? resumeRecording() : pauseRecording());
+
 async function stopRecording() {
+  if (paused) await resumeRecording(true);
   recording = false;
   segmenters.forEach((s) => s.flush());
   meeting.duration = now();
@@ -385,11 +410,24 @@ els.title.onchange = async () => {
 };
 
 // ---------- notes ----------
+// Prefixes: "a:" action, "d:" decision, "q:" question. Pauses are stored as notes with tag "pause".
+const TAGS = {
+  a: { key: 'action', label: 'Action', icon: '✅' },
+  d: { key: 'decision', label: 'Decision', icon: '⚖️' },
+  q: { key: 'question', label: 'Question', icon: '❓' },
+};
+const TAG_BY_KEY = Object.fromEntries(Object.values(TAGS).map((x) => [x.key, x]));
+function parseNote(raw) {
+  const m = raw.match(/^([adq])\s*[:.]\s*(.+)$/i);
+  return m ? { tag: TAGS[m[1].toLowerCase()].key, text: m[2].trim() } : { tag: null, text: raw };
+}
+const noteIcon = (n) => (n.tag === 'pause' ? '⏸' : TAG_BY_KEY[n.tag]?.icon || '📝');
+const noteLabel = (n) => (TAG_BY_KEY[n.tag] ? `**${TAG_BY_KEY[n.tag].label}:** ` : '');
 els.noteInput.addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter' || !meeting) return;
   const text = els.noteInput.value.trim();
   if (!text) return;
-  meeting.notes.push({ t: recording ? now() : meeting.duration, text });
+  meeting.notes.push({ t: recording ? now() : meeting.duration, ...parseNote(text) });
   els.noteInput.value = '';
   await dbPut(meeting);
   renderNotes();
@@ -400,6 +438,10 @@ els.noteInput.addEventListener('keydown', async (e) => {
 function setUi() {
   els.recBtn.textContent = recording ? 'Stop' : 'Start';
   els.recBtn.className = recording ? 'rec' : 'primary';
+  els.pauseBtn.hidden = !recording;
+  els.pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+  els.pauseBtn.className = paused ? 'primary' : '';
+  document.title = `${paused ? '⏸ ' : recording ? '🔴 ' : ''}MeetNotes v1.3`;
   [els.model, els.mic, els.sys, els.newBtn].forEach((x) => (x.disabled = recording));
   const has = !!meeting;
   els.noteInput.disabled = !has;
@@ -417,16 +459,17 @@ function renderTranscript() {
   const pane = box.parentElement;
   const atBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 60;
   box.innerHTML = '';
-  if (!meeting || !meeting.segments.length) {
+  if (!meeting || (!meeting.segments.length && !meeting.notes.length)) {
     box.innerHTML = `<p class="empty">${recording ? 'Listening…' : 'Press Start. Use headphones on calls so your mic doesn\'t pick up the other side.'}</p>`;
     return;
   }
   for (const e of timeline(meeting)) {
     if (e.note) {
       const n = document.createElement('div');
-      n.className = 'seg inline-note';
-      n.innerHTML = `<time>${fmt(e.t)}</time><b>📝</b>`;
+      n.className = `seg inline-note ${e.note.tag || ''}`;
+      n.innerHTML = `<time>${fmt(e.t)}</time><b>${noteIcon(e.note)}</b>`;
       n.append(Object.assign(document.createElement('span'), { textContent: e.note.text }));
+      if (matches(e.note.text)) n.classList.add('hit');
       box.append(n);
       continue;
     }
@@ -440,17 +483,20 @@ function renderTranscript() {
     span.title = 'Click to correct';
     span.onblur = async () => { const v = span.textContent.trim(); if (v !== s.text) { s.text = v; await dbPut(meeting); } };
     row.append(span);
+    if (matches(s.text)) row.classList.add('hit');
     box.append(row);
   }
-  if (atBottom) pane.scrollTop = pane.scrollHeight;
+  const firstHit = box.querySelector('.hit');
+  if (firstHit && jumpToHit) { firstHit.scrollIntoView({ block: 'center' }); jumpToHit = false; }
+  else if (atBottom) pane.scrollTop = pane.scrollHeight;
 }
 
 function renderNotes() {
   els.notesList.innerHTML = '';
-  for (const n of meeting?.notes || []) {
+  for (const n of (meeting?.notes || []).filter((x) => x.tag !== 'pause')) {
     const d = document.createElement('div');
-    d.className = 'note';
-    d.innerHTML = `<time>${fmt(n.t)}</time>`;
+    d.className = `note ${n.tag || ''}`;
+    d.innerHTML = `<time>${fmt(n.t)}</time>${n.tag ? `${noteIcon(n)} ` : ''}`;
     d.append(document.createTextNode(n.text));
     els.notesList.append(d);
   }
@@ -459,18 +505,45 @@ function renderNotes() {
 
 function renderAll() { renderTranscript(); renderNotes(); }
 
+// ---------- search ----------
+let query = [], jumpToHit = false;
+const norm = (x) => (x || '').toLowerCase();
+const matches = (text) => query.length > 0 && query.every((w) => norm(text).includes(w));
+function meetingHits(m) {
+  if (!query.length) return { ok: true, count: 0, snippet: '' };
+  const texts = [m.title, ...m.notes.map((n) => n.text), ...m.segments.map((s) => s.text)];
+  const all = norm(texts.join(' \n '));
+  if (!query.every((w) => all.includes(w))) return { ok: false };
+  const lines = texts.slice(1).filter((t) => query.some((w) => norm(t).includes(w)));
+  const first = lines[0] || m.title;
+  const i = Math.max(0, norm(first).indexOf(query[0]) - 30);
+  return { ok: true, count: lines.length, snippet: (i ? '…' : '') + first.slice(i, i + 90) + (first.length > i + 90 ? '…' : '') };
+}
+let searchTimer;
+els.search.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    query = norm(els.search.value).split(/\s+/).filter(Boolean);
+    refreshLibrary();
+    renderTranscript();
+  }, 200);
+});
+
 async function refreshLibrary() {
   const all = (await dbAll()).sort((a, b) => b.created - a.created);
-  els.library.innerHTML = all.length ? '' : '<p class="empty">No meetings yet</p>';
-  for (const m of all) {
+  const shown = all.map((m) => ({ m, h: meetingHits(m) })).filter((x) => x.h.ok);
+  els.library.innerHTML = shown.length ? '' : `<p class="empty">${all.length ? 'No matches' : 'No meetings yet'}</p>`;
+  for (const { m, h } of shown) {
     const d = document.createElement('div');
     d.className = 'item' + (meeting?.id === m.id ? ' active' : '');
     d.textContent = m.title;
     const small = document.createElement('small');
-    small.textContent = `${new Date(m.created).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })} · ${fmt(m.duration)}`;
+    small.textContent = `${new Date(m.created).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })} · ${fmt(m.duration)}${h.count ? ` · ${h.count} hit${h.count === 1 ? '' : 's'}` : ''}`;
     d.append(small);
+    if (h.snippet) d.append(Object.assign(document.createElement('small'), { className: 'snip', textContent: h.snippet }));
     d.onclick = async () => {
       if (recording) return;
+      jumpToHit = query.length > 0;
       meeting = await dbGet(m.id);
       els.title.value = meeting.title;
       els.clock.textContent = fmt(meeting.duration);
@@ -484,7 +557,13 @@ async function refreshLibrary() {
 function toMarkdown(m) {
   const when = new Date(m.created).toLocaleString('en-AU', { dateStyle: 'full', timeStyle: 'short' });
   let md = `# ${m.title}\n\n_${when} · ${fmt(m.duration)}_\n\n`;
-  if (m.notes.length) md += `## My notes\n\n${m.notes.map((n) => `- [${fmt(n.t)}] ${n.text}`).join('\n')}\n\n`;
+  const mine = m.notes.filter((n) => n.tag !== 'pause');
+  for (const tag of Object.values(TAGS)) {
+    const list = mine.filter((n) => n.tag === tag.key);
+    if (list.length) md += `## ${tag.label}s I flagged\n\n${list.map((n) => `- [${fmt(n.t)}] ${n.text}`).join('\n')}\n\n`;
+  }
+  const plain = mine.filter((n) => !n.tag);
+  if (plain.length) md += `## My notes\n\n${plain.map((n) => `- [${fmt(n.t)}] ${n.text}`).join('\n')}\n\n`;
   md += '## Transcript\n\n';
   // Paragraphs break on speaker change, a pause of 4 s+, or every 30 s, and each one gets its own time.
   // Notes are placed in the transcript at the moment they were typed.
@@ -495,7 +574,7 @@ function toMarkdown(m) {
     block = null;
   };
   for (const e of timeline(m)) {
-    if (e.note) { close(); out.push(`> 📝 [${fmt(e.t)}] ${e.note.text}`); continue; }
+    if (e.note) { close(); out.push(`> ${noteIcon(e.note)} [${fmt(e.t)}] ${noteLabel(e.note)}${e.note.text}`); continue; }
     const s = e.seg;
     if (block && block.who === s.who && s.t - block.end < 4 && s.t - block.t < 30) {
       block.text.push(s.text);
@@ -526,7 +605,7 @@ Produce, in Australian English:
 4. Open questions / risks
 5. My notes, expanded with the relevant detail from the transcript around each note's timestamp
 
-Lines starting with 📝 inside the transcript are my notes, placed at the moment I typed them; the speech just before each one is usually what it refers to. Treat "I" in "Me" or "Room" lines as me (Michael) when assigning action owners.
+Lines starting with 📝 ✅ ⚖️ or ❓ inside the transcript are my notes, placed at the moment I typed them; the speech just before each one is usually what it refers to. Notes I flagged as Action, Decision or Question are confirmed by me: always include them in the matching section, using the transcript to fill in owner and due date. ⏸ lines mark pauses; nothing was recorded during them. Treat "I" in "Me" or "Room" lines as me (Michael) when assigning action owners.
 
 Use the context below for spellings, roles and likely owners, but do not invent anything that is not in the transcript or notes. Mark uncertain names or terms with (?).
 
